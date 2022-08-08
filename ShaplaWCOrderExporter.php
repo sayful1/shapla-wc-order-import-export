@@ -43,25 +43,19 @@ class ShaplaWCOrderExporter {
 	}
 
 
-
 	public function export_wp( $args ) {
 		if ( isset( $args['content'] ) && 'shop_order' == $args['content'] ) {
 			$start_date = $_GET['start_date'] ?? '';
 			$end_date   = $_GET['end_date'] ?? '';
 			$order_ids  = $_GET['order_ids'] ?? '';
-			if ( ! empty( $order_ids ) ) {
-				$order_ids = explode( ',', $order_ids );
-				$order_ids = array_map( 'intval', $order_ids );
-			}
+			$order_ids  = array_filter( explode( ',', $order_ids ) );
 
-			global $wpdb;
 			$data = [];
+
 			if ( count( $order_ids ) ) {
-				$sql     = "SELECT * FROM $wpdb->posts WHERE post_type = 'shop_order' AND ID IN(" . implode( ',', $order_ids ) . ")";
-				$results = $wpdb->get_results( $sql, ARRAY_A );
-				foreach ( $results as $result ) {
-					$data[] = $this->get_order_data_to_export( $result );
-				}
+				$data = $this->get_order_data_by_ids( $order_ids );
+			} elseif ( ! empty( $start_date ) ) {
+				$data = $this->get_order_data_by_dates( $start_date, $end_date );
 			}
 
 			$sitename = sanitize_key( get_bloginfo( 'name' ) );
@@ -77,6 +71,58 @@ class ShaplaWCOrderExporter {
 		}
 	}
 
+	public function get_order_data_by_ids( array $order_ids ): array {
+		global $wpdb;
+		$data = [];
+		if ( count( $order_ids ) < 1 ) {
+			return $data;
+		}
+		$order_ids = array_map( 'intval', $order_ids );
+		$sql       = "SELECT * FROM $wpdb->posts WHERE post_type = 'shop_order' AND ID IN(" . implode( ',', $order_ids ) . ")";
+		$results   = $wpdb->get_results( $sql, ARRAY_A );
+		foreach ( $results as $result ) {
+			$data[] = $this->get_order_data_to_export( $result );
+		}
+
+		return $data;
+	}
+
+	/**
+	 * Get order data by dates
+	 *
+	 * @param string|null $start_date Start date in format YYYY-MM-DD.
+	 * @param string|null $end_date End date in format YYYY-MM-DD.
+	 *
+	 * @return array
+	 */
+	public function get_order_data_by_dates( ?string $start_date, ?string $end_date = null ): array {
+		global $wpdb;
+		$data = [];
+
+		$sql = "SELECT * FROM $wpdb->posts WHERE post_type = 'shop_order'";
+		if ( $start_date && $end_date ) {
+			$sql .= $wpdb->prepare( " AND post_date_gmt > %s AND post_date_gmt < %s", $start_date, $end_date );
+		} elseif ( $start_date ) {
+			$sql .= $wpdb->prepare( " AND post_date_gmt > %s", $start_date );
+		} elseif ( $end_date ) {
+			$sql .= $wpdb->prepare( " AND post_date_gmt < %s", $start_date );
+		}
+		$results = $wpdb->get_results( $sql, ARRAY_A );
+
+		foreach ( $results as $result ) {
+			$data[] = $this->get_order_data_to_export( $result );
+		}
+
+		return $data;
+	}
+
+	/**
+	 * Get order data to export for a single post
+	 *
+	 * @param array $post_data List of data from posts table.
+	 *
+	 * @return array
+	 */
 	public function get_order_data_to_export( array $post_data ): array {
 		$data = [
 			'order'          => $post_data,
