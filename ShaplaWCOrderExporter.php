@@ -2,49 +2,79 @@
 
 defined( 'ABSPATH' ) || exit;
 
+/**
+ * ShaplaWCOrderExporter class
+ */
 class ShaplaWCOrderExporter {
+
+	/**
+	 * Add export filter
+	 *
+	 * @return void
+	 */
 	public function export_filters() {
+		wp_nonce_field( 'shapla-wc-order-import-export', '_ei_nonce' );
 		?>
-        <p><label><input type="radio" name="content" value="shop_order">WooCommerce Order (JSON Export)</label></p>
-        <ul id="shop_order-filters" class="export-filters">
-            <li>
-                <label for="post-start-date" class="label-responsive"><?php _e( 'Start date:' ); ?></label>
-                <input type="date" name="start_date" id="post-start-date">
-            </li>
-            <li>
-                <label for="post-end-date" class="label-responsive"><?php _e( 'End date:' ); ?></label>
-                <input type="date" name="end_date" id="post-end-date">
-            </li>
-            <li>
-                <label for="order-ids" class="label-responsive"><?php _e( 'Order Ids:' ); ?></label>
-                <textarea id="order-ids" name="order_ids"></textarea>
-            </li>
-        </ul>
+		<p>
+			<label>
+				<input type="radio" name="content" value="shop_order">
+				<?php esc_html_e( 'WooCommerce Order (JSON Export)', 'shapla-wc-order-import-export' ); ?>
+			</label>
+		</p>
+		<ul id="shop_order-filters" class="export-filters">
+			<li>
+				<label for="post-start-date" class="label-responsive">
+					<?php esc_html_e( 'Start date:', 'shapla-wc-order-import-export' ); ?></label>
+				<input type="date" name="start_date" id="post-start-date">
+			</li>
+			<li>
+				<label for="post-end-date" class="label-responsive">
+					<?php esc_html_e( 'End date:', 'shapla-wc-order-import-export' ); ?></label>
+				<input type="date" name="end_date" id="post-end-date">
+			</li>
+			<li>
+				<label for="order-ids" class="label-responsive">
+					<?php esc_html_e( 'Order Ids:', 'shapla-wc-order-import-export' ); ?></label>
+				<textarea id="order-ids" name="order_ids"></textarea>
+			</li>
+		</ul>
 		<?php
 
 		add_action( 'admin_footer', [ $this, 'footer_script' ] );
 	}
 
 
+	/**
+	 * Add jQuery script to toggle export filter
+	 *
+	 * @return void
+	 */
 	public function footer_script() {
 		?>
-        <script type="text/javascript">
-            jQuery(function ($) {
-                $('#export-filters').find('input:radio').on('change', function () {
-                    switch ($(this).val()) {
-                        case 'shop_order':
-                            $('#shop_order-filters').slideDown();
-                            break;
-                    }
-                });
-            });
-        </script>
+		<script type="text/javascript">
+			jQuery(function ($) {
+				$('#export-filters').find('input:radio').on('change', function () {
+					switch ($(this).val()) {
+						case 'shop_order':
+							$('#shop_order-filters').slideDown();
+							break;
+					}
+				});
+			});
+		</script>
 		<?php
 	}
 
-
-	public function export_wp( $args ) {
-		if ( isset( $args['content'] ) && 'shop_order' == $args['content'] ) {
+	/**
+	 * Export JSON file
+	 *
+	 * @param array $args The arguments.
+	 *
+	 * @return void
+	 */
+	public function export_wp( array $args ) {
+		check_admin_referer( 'shapla-wc-order-import-export', '_ei_nonce' );
+		if ( isset( $args['content'] ) && 'shop_order' === $args['content'] ) {
 			$start_date = $_GET['start_date'] ?? '';
 			$end_date   = $_GET['end_date'] ?? '';
 			$order_ids  = $_GET['order_ids'] ?? '';
@@ -66,11 +96,18 @@ class ShaplaWCOrderExporter {
 			header( 'Content-Description: File Transfer' );
 			header( 'Content-Disposition: attachment; filename=' . $filename );
 			header( 'Content-Type: application/json; charset=' . get_option( 'blog_charset' ), true );
-			echo $json;
+			echo $json; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 			die;
 		}
 	}
 
+	/**
+	 * Get order data by order ids.
+	 *
+	 * @param array $order_ids Order ids.
+	 *
+	 * @return array
+	 */
 	public function get_order_data_by_ids( array $order_ids ): array {
 		global $wpdb;
 		$data = [];
@@ -78,8 +115,8 @@ class ShaplaWCOrderExporter {
 			return $data;
 		}
 		$order_ids = array_map( 'intval', $order_ids );
-		$sql       = "SELECT * FROM $wpdb->posts WHERE post_type = 'shop_order' AND ID IN(" . implode( ',', $order_ids ) . ")";
-		$results   = $wpdb->get_results( $sql, ARRAY_A );
+		$sql       = "SELECT * FROM $wpdb->posts WHERE post_type = 'shop_order' AND ID IN(" . implode( ',', $order_ids ) . ')';
+		$results   = $wpdb->get_results( $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		foreach ( $results as $result ) {
 			$data[] = $this->get_order_data_to_export( $result );
 		}
@@ -101,13 +138,13 @@ class ShaplaWCOrderExporter {
 
 		$sql = "SELECT * FROM $wpdb->posts WHERE post_type = 'shop_order'";
 		if ( $start_date && $end_date ) {
-			$sql .= $wpdb->prepare( " AND post_date_gmt > %s AND post_date_gmt < %s", $start_date, $end_date );
+			$sql .= $wpdb->prepare( ' AND post_date_gmt > %s AND post_date_gmt < %s', $start_date, $end_date );
 		} elseif ( $start_date ) {
-			$sql .= $wpdb->prepare( " AND post_date_gmt > %s", $start_date );
+			$sql .= $wpdb->prepare( ' AND post_date_gmt > %s', $start_date );
 		} elseif ( $end_date ) {
-			$sql .= $wpdb->prepare( " AND post_date_gmt < %s", $start_date );
+			$sql .= $wpdb->prepare( ' AND post_date_gmt < %s', $start_date );
 		}
-		$results = $wpdb->get_results( $sql, ARRAY_A );
+		$results = $wpdb->get_results( $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 
 		foreach ( $results as $result ) {
 			$data[] = $this->get_order_data_to_export( $result );
@@ -155,8 +192,8 @@ class ShaplaWCOrderExporter {
 		$item_ids = array_map( 'intval', $item_ids );
 
 		if ( $item_ids ) {
-			$sql   = "SELECT * FROM `{$wpdb->prefix}woocommerce_order_itemmeta` WHERE `order_item_id` IN(" . implode( ',', $item_ids ) . ")";
-			$items = $wpdb->get_results( $sql, ARRAY_A );
+			$sql   = "SELECT * FROM `{$wpdb->prefix}woocommerce_order_itemmeta` WHERE `order_item_id` IN(" . implode( ',', $item_ids ) . ')';
+			$items = $wpdb->get_results( $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 
 			foreach ( $items as $item ) {
 				$data['items_metadata'][ $item['order_item_id'] ][ $item['meta_key'] ] = $item['meta_value'];

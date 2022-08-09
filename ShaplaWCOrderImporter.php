@@ -2,8 +2,22 @@
 
 defined( 'ABSPATH' ) || exit;
 
+/**
+ * ShaplaWCOrderImporter class
+ */
 class ShaplaWCOrderImporter extends \WP_Importer {
+	/**
+	 * The attachment id.
+	 *
+	 * @var int
+	 */
 	private $id = 0;
+
+	/**
+	 * The file url
+	 *
+	 * @var string
+	 */
 	private $file_url = '';
 
 
@@ -45,6 +59,11 @@ class ShaplaWCOrderImporter extends \WP_Importer {
 		$this->footer();
 	}
 
+	/**
+	 * Handle file upload
+	 *
+	 * @return bool
+	 */
 	private function handle_upload() {
 		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Nonce already verified in WC_Tax_Rate_Importer::dispatch()
 		$file_url = isset( $_POST['file_url'] ) ? sanitize_text_field( wp_unslash( $_POST['file_url'] ) ) : '';
@@ -60,13 +79,13 @@ class ShaplaWCOrderImporter extends \WP_Importer {
 				// Remove file if not valid.
 				wp_delete_attachment( $file['id'], true );
 
-				$this->import_error( __( 'Invalid file type. The importer supports CSV and TXT file formats.', 'woocommerce' ) );
+				$this->import_error( __( 'Invalid file type. The importer supports JSON file formats.', 'shapla-wc-order-import-export' ) );
 			}
 
 			$this->id = absint( $file['id'] );
 		} elseif ( file_exists( ABSPATH . $file_url ) ) {
 			if ( ! self::is_file_valid_json( ABSPATH . $file_url ) ) {
-				$this->import_error( __( 'Invalid file type. The importer supports CSV and TXT file formats.', 'woocommerce' ) );
+				$this->import_error( __( 'Invalid file type. The importer supports JSON file formats.', 'shapla-wc-order-import-export' ) );
 			}
 
 			$this->file_url = esc_attr( $file_url );
@@ -77,9 +96,16 @@ class ShaplaWCOrderImporter extends \WP_Importer {
 		return true;
 	}
 
+	/**
+	 * Import data
+	 *
+	 * @param string $file The file path.
+	 *
+	 * @return void
+	 */
 	private function import( string $file ) {
 		if ( ! is_file( $file ) ) {
-			$this->import_error( __( 'The file does not exist, please try again.', 'woocommerce' ) );
+			$this->import_error( __( 'The file does not exist, please try again.', 'shapla-wc-order-import-export' ) );
 		}
 
 		$content = wp_json_file_decode( $file, array( 'associative' => true ) );
@@ -98,45 +124,61 @@ class ShaplaWCOrderImporter extends \WP_Importer {
 		echo '<div class="updated settings-error"><p>';
 		printf(
 		/* translators: %s: tax rates count */
-			esc_html__( 'Import complete - imported %s orders.', 'woocommerce' ),
+			esc_html__( 'Import complete - imported %s orders.', 'shapla-wc-order-import-export' ),
 			'<strong>' . count( $new_orders ) . '</strong>'
 		);
 		echo '</p></div>';
 	}
 
-	private function import_single_order( $order_data ) {
-		$id = wp_insert_post( $order_data['order'] );
-		if ( is_wp_error( $id ) ) {
+	/**
+	 * Import single order
+	 *
+	 * @param array $order_data The order data.
+	 *
+	 * @return int
+	 */
+	private function import_single_order( array $order_data ) {
+		global $wpdb;
+		$id = $wpdb->insert( $wpdb->posts, $order_data['order'] );
+		if ( false === $id ) {
 			$this->import_error();
 
 			return 0;
 		}
+		$id = $wpdb->insert_id;
 
 		foreach ( $order_data['metadata'] as $key => $value ) {
 			update_post_meta( $id, $key, maybe_unserialize( $value ) );
 		}
 
-		global $wpdb;
-
 		foreach ( $order_data['notes'] as $note ) {
+			if ( isset( $note['comment_ID'] ) ) {
+				unset( $note['comment_ID'] );
+			}
 			$wpdb->insert( $wpdb->comments, $note );
 		}
 
 		foreach ( $order_data['items'] as $order_item ) {
-			$wpdb->insert( $wpdb->prefix . 'woocommerce_order_items', [
-				'order_item_name' => $order_item['order_item_name'],
-				'order_item_type' => $order_item['order_item_type'],
-				'order_id'        => $id,
-			] );
+			$wpdb->insert(
+				$wpdb->prefix . 'woocommerce_order_items',
+				[
+					'order_item_name' => $order_item['order_item_name'],
+					'order_item_type' => $order_item['order_item_type'],
+					'order_id'        => $id,
+				]
+			);
 			$order_item_id = $wpdb->insert_id;
 			$metadata      = $order_data['items_metadata'][ $order_item['order_item_id'] ];
 			if ( is_array( $metadata ) ) {
 				foreach ( $metadata as $key => $value ) {
-					$wpdb->insert( $wpdb->prefix . 'woocommerce_order_itemmeta', [
-						'order_item_id' => $order_item_id,
-						'meta_key'      => $key,
-						'meta_value'    => $value,
-					] );
+					$wpdb->insert(
+						$wpdb->prefix . 'woocommerce_order_itemmeta',
+						[
+							'order_item_id' => $order_item_id,
+							'meta_key'      => $key,
+							'meta_value'    => $value,
+						]
+					);
 				}
 			}
 		}
@@ -150,7 +192,7 @@ class ShaplaWCOrderImporter extends \WP_Importer {
 	public function greet() {
 
 		echo '<div class="narrow">';
-		echo '<p>' . esc_html__( 'Hi there! Upload a JSON file containing orders to import the contents into your shop. Choose a .json file to upload, then click "Upload file and import".', 'woocommerce' ) . '</p>';
+		echo '<p>' . esc_html__( 'Hi there! Upload a JSON file containing orders to import the contents into your shop. Choose a .json file to upload, then click "Upload file and import".', 'shapla-wc-order-import-export' ) . '</p>';
 
 		$action = 'admin.php?import=woocommerce_order_json&step=1';
 
@@ -159,51 +201,50 @@ class ShaplaWCOrderImporter extends \WP_Importer {
 		$upload_dir = wp_upload_dir();
 		if ( ! empty( $upload_dir['error'] ) ) :
 			?>
-            <div class="error">
-                <p><?php esc_html_e( 'Before you can upload your import file, you will need to fix the following error:', 'woocommerce' ); ?></p>
-                <p><strong><?php echo esc_html( $upload_dir['error'] ); ?></strong></p>
-            </div>
+			<div class="error">
+				<p><?php esc_html_e( 'Before you can upload your import file, you will need to fix the following error:', 'shapla-wc-order-import-export' ); ?></p>
+				<p><strong><?php echo esc_html( $upload_dir['error'] ); ?></strong></p>
+			</div>
 		<?php else : ?>
-            <form enctype="multipart/form-data" id="import-upload-form" method="post"
-                  action="<?php echo esc_attr( wp_nonce_url( $action, 'import-upload' ) ); ?>">
-                <table class="form-table">
-                    <tbody>
-                    <tr>
-                        <th>
-                            <label for="upload"><?php esc_html_e( 'Choose a file from your computer:', 'woocommerce' ); ?></label>
-                        </th>
-                        <td>
-                            <input type="file" id="upload" name="import" size="25"/>
-                            <input type="hidden" name="action" value="save"/>
-                            <input type="hidden" name="max_file_size" value="<?php echo absint( $bytes ); ?>"/>
-                            <small>
+			<form enctype="multipart/form-data" id="import-upload-form" method="post" action="<?php echo esc_attr( wp_nonce_url( $action, 'shapla-wc-order-import-export' ) ); ?>">
+				<table class="form-table">
+					<tbody>
+					<tr>
+						<th>
+							<label for="upload"><?php esc_html_e( 'Choose a file from your computer:', 'shapla-wc-order-import-export' ); ?></label>
+						</th>
+						<td>
+							<input type="file" id="upload" name="import" size="25"/>
+							<input type="hidden" name="action" value="save"/>
+							<input type="hidden" name="max_file_size" value="<?php echo absint( $bytes ); ?>"/>
+							<small>
 								<?php
 								printf(
 								/* translators: %s: maximum upload size */
-									esc_html__( 'Maximum size: %s', 'woocommerce' ),
+									esc_html__( 'Maximum size: %s', 'shapla-wc-order-import-export' ),
 									esc_attr( $size )
 								);
 								?>
-                            </small>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th>
-                            <label for="file_url"><?php esc_html_e( 'OR enter path to file:', 'woocommerce' ); ?></label>
-                        </th>
-                        <td>
-							<?php echo ' ' . esc_html( ABSPATH ) . ' '; ?><input type="text" id="file_url"
-                                                                                 name="file_url" size="25"/>
-                        </td>
-                    </tr>
-                    </tbody>
-                </table>
-                <p class="submit">
-                    <button type="submit" class="button"
-                            value="<?php esc_attr_e( 'Upload file and import', 'woocommerce' ); ?>"><?php esc_html_e( 'Upload file and import', 'woocommerce' ); ?></button>
-                </p>
-            </form>
-		<?php
+							</small>
+						</td>
+					</tr>
+					<tr>
+						<th>
+							<label for="file_url"><?php esc_html_e( 'OR enter path to file:', 'shapla-wc-order-import-export' ); ?></label>
+						</th>
+						<td>
+							<?php echo ' ' . esc_html( ABSPATH ) . ' '; ?>
+							<input type="text" id="file_url" name="file_url" size="25"/>
+						</td>
+					</tr>
+					</tbody>
+				</table>
+				<p class="submit">
+					<button type="submit" class="button"
+							value="<?php esc_attr_e( 'Upload file and import', 'shapla-wc-order-import-export' ); ?>"><?php esc_html_e( 'Upload file and import', 'shapla-wc-order-import-export' ); ?></button>
+				</p>
+			</form>
+			<?php
 		endif;
 
 		echo '</div>';
@@ -215,7 +256,7 @@ class ShaplaWCOrderImporter extends \WP_Importer {
 	 * @param string $message Error message.
 	 */
 	private function import_error( string $message = '' ) {
-		echo '<p><strong>' . esc_html__( 'Sorry, there has been an error.', 'woocommerce' ) . '</strong><br />';
+		echo '<p><strong>' . esc_html__( 'Sorry, there has been an error.', 'shapla-wc-order-import-export' ) . '</strong><br />';
 		if ( $message ) {
 			echo esc_html( $message );
 		}
@@ -224,24 +265,35 @@ class ShaplaWCOrderImporter extends \WP_Importer {
 		die();
 	}
 
+	/**
+	 * Header content.
+	 *
+	 * @return void
+	 */
 	private function header() {
 		echo '<div class="wrap">';
-		echo '<h1>' . esc_html__( 'Import order', 'woocommerce' ) . '</h1>';
+		echo '<h1>' . esc_html__( 'Import order', 'shapla-wc-order-import-export' ) . '</h1>';
 	}
 
+	/**
+	 * Footer content
+	 *
+	 * @return void
+	 */
 	private function footer() {
 		echo '</div>';
 	}
 
 	/**
-	 * @param $file_path_or_url
+	 * Check if the file is a valid json
+	 *
+	 * @param string $file_path_or_url The file path/url to be tested.
 	 *
 	 * @return bool
 	 */
-	private static function is_file_valid_json( $file_path_or_url ): bool {
-		return true;
+	private static function is_file_valid_json( string $file_path_or_url ): bool {
 		$valid_filetypes = [
-			'json' => 'application/json'
+			'json' => 'application/json',
 		];
 		$filetype        = wp_check_filetype( $file_path_or_url, $valid_filetypes );
 
